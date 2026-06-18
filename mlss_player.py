@@ -243,7 +243,7 @@ def adsr_formula(value):
 def should_render():
     return finish < 1 or maxxed < 1 or (finish == 255 and adsrtype != 4)
 
-def render(channel):
+def render(track):
     global samplerate
     global nexttick
     global currenttick
@@ -280,7 +280,7 @@ def render(channel):
     
     global endsample
     
-    rom.seek(offset + (channel * 2))
+    rom.seek(offset + (track * 2))
     offset += int.from_bytes(rom.read(2), 'little')
     rom.seek(offset)
     
@@ -301,7 +301,7 @@ def render(channel):
     instrument = 0
     adsr = 0
     adsrtype = 0
-    pulse = channel > 6
+    pulse = channel > 7
     
     mastervolume = 0.5
     maxxed = 0
