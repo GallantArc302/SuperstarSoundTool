@@ -89,7 +89,7 @@ def read_song():
             bendrange = int.from_bytes(rom.read(1), 'little')
             
         case 0xF5:
-            bend = int.from_bytes(rom.read(1), signed=True)
+            bend = int.from_bytes(rom.read(1), 'little', signed=True)
             sample_pitch(note)
             
         case 0xF6:
