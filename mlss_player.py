@@ -182,7 +182,6 @@ def play_note(note):
         playing = 0
         adsr = 0
         adsrtype = 4
-        return
     
     load_wave(int.from_bytes(rom.read(1), 'little'))
     unpitched = int.from_bytes(rom.read(1), 'little')
