@@ -11,13 +11,10 @@ def load_wave(id):
     global wave
     global instrument
     global pan
-    global pulse
     
     temp = rom.tell()
     
-    if channel < 8:
-        pulse = 0
-        
+    if not pulse:
         rom.seek(wavetable + (id * 4))
         offset = int.from_bytes(rom.read(4), 'little') + wavetable
         rom.seek(offset)
@@ -28,8 +25,6 @@ def load_wave(id):
         wavelength = int.from_bytes(rom.read(4), 'little')
         wave = rom.read(wavelength)
     else:
-        pulse = 1
-        
         wavehasloop = 1
         waveloop = 0
         wavelength = 8
@@ -61,7 +56,6 @@ def read_song():
     global note
     global bendrange
     global bend
-    global pulse
     global adsr
     global adsrtype
     
@@ -121,7 +115,7 @@ def read_song():
                         value2 = int.from_bytes(rom.read(1), 'little')
                         wait += value2
                         if not extend:
-                            if not pulse:
+                            if not pulse or adsr == 0:
                                 wavesample = 0
                             adsr = 0
                             adsrtype = 0
@@ -132,7 +126,7 @@ def read_song():
                     note = int.from_bytes(rom.read(1), 'little')
                     wait += byte
                     if not extend:
-                        if not pulse:
+                        if not pulse or adsr == 0:
                             wavesample = 0
                         adsr = 0
                         adsrtype = 0
@@ -246,6 +240,9 @@ def adsr_formula(value):
     else:
         return value / (255 * outrate * 0.015)
 
+def should_render():
+    return finish < 1 or maxxed < 1 or (finish == 255 and adsrtype != 4)
+
 def render(channel):
     global samplerate
     global nexttick
@@ -264,6 +261,8 @@ def render(channel):
     global bendrange
     global bend
     global note
+    global pulse
+    global maxxed
     
     global wavehasloop
     global waverate
@@ -285,14 +284,12 @@ def render(channel):
     offset += int.from_bytes(rom.read(2), 'little')
     rom.seek(offset)
     
-    bpm = 120
     nexttick = 0
-    currenttick = -1
+    currenttick = 0
     
     out = []
     bend = 0
     bendrange = 0
-    note = 0
     wavesample = 0
     wait = 0
     volume = 255
@@ -304,37 +301,42 @@ def render(channel):
     instrument = 0
     adsr = 0
     adsrtype = 0
-    play_note(0)
+    pulse = channel > 6
     
     mastervolume = 0.5
     maxxed = 0
     
-    while finish < 1 or maxxed < 1 or (finish == 255 and adsrtype != 4):
-        tick()
-        
+    while should_render():
         while wait <= currenttick and finish < 255:
             read_song()
+        tick()
         
-        for i in range(math.ceil(nexttick - currentsample)):
-            if finish < 1 or maxxed < 1 or (finish == 255 and adsrtype != 4):
+        for _ in range(math.ceil(nexttick - currentsample)):
+            if not should_render():
+                break
+            
+            if playing:
                 calculate_adsr()
                 
-                sampleL = get_sample(wave, int(wavesample), volume * adsr * playing * (1 - max(pan, 0)) * mastervolume)
-                sampleR = get_sample(wave, int(wavesample), volume * adsr * playing * (min(pan, 0) + 1) * mastervolume)
-                out.append(int(sampleL * 256))
-                out.append(int(sampleR * 256))
-                wavesample += (samplerate / outrate)
-                currentsample += 1
-                
-                if currentsample >= endsample:
-                    maxxed = 1
-                    endsample = currentsample
-                
-                if wavesample >= len(wave):
-                    if not wavehasloop:
-                        playing = 0
-                    wavesample = waveloop + (wavesample % 1)
-        
+                if adsrtype != 4:
+                    sampleL = get_sample(wave, int(wavesample), volume * adsr * playing * (1 - max(pan, 0)) * mastervolume)
+                    sampleR = get_sample(wave, int(wavesample), volume * adsr * playing * (min(pan, 0) + 1) * mastervolume)
+                    out.extend([int(sampleL * 256), int(sampleR * 256)])
+                    
+                    wavesample += (samplerate / outrate)
+                    if wavesample >= len(wave):
+                        if not wavehasloop:
+                            playing = 0
+                        wavesample = waveloop + (wavesample % 1)
+                else:
+                    out.extend([0, 0])
+            else:
+                out.extend([0, 0])
+            currentsample += 1
+            
+            if currentsample >= endsample:
+                maxxed = 1
+                endsample = currentsample
         
     return out
 
@@ -379,35 +381,35 @@ with open(f'{input()}.gba', 'rb') as rom:
             retry = 0
             
             for channel in tracksenabled:
-                if channel > -1:
-                    if retry == 0:
-                        track += 1
-                        global offset
-                        offset = song
+                if retry == 0:
+                    track += 1
+                    
+                    global offset
+                    offset = song
+                    
+                    rendered = render(track)
+                    
+                    if endsample > prevmax:
+                        prevmax = endsample
+                        if track > 1: retry = 1
+                    
+                    print(f'ENDSAMPLE: {endsample}')
+                    
+                    with open(f'{songindex}_{channel}.wav', 'wb') as out:
+                        out.write('RIFF'.encode('ascii'))
+                        out.write((len(rendered) * 2 + 36).to_bytes(4, 'little')) # riff size
+                        out.write('WAVEfmt '.encode('ascii'))
+                        out.write((16).to_bytes(4, 'little')) # fmt size
+                        out.write((1).to_bytes(2, 'little')) # type
+                        out.write((2).to_bytes(2, 'little')) # channels
+                        out.write((outrate).to_bytes(4, 'little')) # sample rate
+                        out.write((outrate * 2 * 2).to_bytes(4, 'little')) # sample rate * bytes * channels
+                        out.write((2 * 2).to_bytes(2, 'little')) # bytes * channels
+                        out.write((16).to_bytes(2, 'little')) # bits
                         
-                        rendered = render(track)
-                        
-                        if endsample > prevmax:
-                            prevmax = endsample
-                            if track > 1: retry = 1
-                        
-                        print(f'ENDSAMPLE: {endsample}')
-                        
-                        with open(f'{songindex}_{channel}.wav', 'wb') as out:
-                            out.write('RIFF'.encode('ascii'))
-                            out.write((len(rendered) * 2 + 36).to_bytes(4, 'little')) # riff size
-                            out.write('WAVEfmt '.encode('ascii'))
-                            out.write((16).to_bytes(4, 'little')) # fmt size
-                            out.write((1).to_bytes(2, 'little')) # type
-                            out.write((2).to_bytes(2, 'little')) # channels
-                            out.write((outrate).to_bytes(4, 'little')) # sample rate
-                            out.write((outrate * 2 * 2).to_bytes(4, 'little')) # sample rate * bytes * channels
-                            out.write((2 * 2).to_bytes(2, 'little')) # bytes * channels
-                            out.write((16).to_bytes(2, 'little')) # bits
-                            
-                            out.write('data'.encode('ascii'))
-                            out.write((len(rendered) * 2).to_bytes(4, 'little')) # data size
-                            out.write(np.array(rendered, np.int16))
+                        out.write('data'.encode('ascii'))
+                        out.write((len(rendered) * 2).to_bytes(4, 'little')) # data size
+                        out.write(np.array(rendered, np.int16))
                     
             if retry == 0:
                 songindex += 1

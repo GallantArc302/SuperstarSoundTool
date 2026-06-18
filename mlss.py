@@ -214,7 +214,7 @@ def setup_folder():
         os.remove(f'{folder}\\-header.txt')
 
 def inject_samples():
-    global empty
+    global free
     
     writtensampleoffset = sampledatastart
     
@@ -252,8 +252,8 @@ def inject_samples():
                     samples = wav.read(samplecount)
                 
                 end = writtensampleoffset + 0x10 + samplecount
-                if end > sampledataend and writtensampleoffset < empty:
-                    writtensampleoffset = empty
+                if end > sampledataend and writtensampleoffset < free:
+                    writtensampleoffset = free
                 
                 outrom.seek(sampletable + (len(samplelist) * 4))
                 outrom.write((writtensampleoffset - sampletable).to_bytes(4, 'little'))
@@ -268,8 +268,8 @@ def inject_samples():
                 writtensampleoffset += 0x10 + samplecount
                 writtensampleoffset += samplecount % 2 # even sizes only (IMPORTANT)
                 writtensampleoffset += writtensampleoffset % 4 # align (IMPORTANT)
-                if writtensampleoffset > empty:
-                    empty = writtensampleoffset
+                if writtensampleoffset > free:
+                    free = writtensampleoffset
                 
             samplelist.append(sample)
 
@@ -320,7 +320,7 @@ def inject_instruments():
             instrumentlist.append(file)
 
 def inject_songs():
-    global empty
+    global free
     
     writtensongoffset = songdatastart
     
@@ -346,8 +346,8 @@ def inject_songs():
                     size += len(tracks[track])
                 
                 end = writtensongoffset + size
-                if end > songdataend and writtensongoffset < empty:
-                    writtensongoffset = empty
+                if end > songdataend and writtensongoffset < free:
+                    writtensongoffset = free
                 
                 outrom.seek(writtensongoffset)
                 outrom.write(usedtracks.to_bytes(2, 'little'))
@@ -489,13 +489,13 @@ with open(sys.argv[1], 'rb') as rom:
     rom.seek(0xAC)
     id = rom.read(4)
     
-    global empty
+    global free
     match id:
         case b'A88E':
             songtable           = 0x21CB70
             songcount           = 407
             songdatastart       = 0x19BB2C
-            songdataend         = 0x1DA51C
+            songdataend         = 0x1DA690
             instrumenttable     = 0x21D1CC
             instrumentcount     = 260
             instrumentdatastart = 0x21D3D6
@@ -504,7 +504,7 @@ with open(sys.argv[1], 'rb') as rom:
             samplecount         = 236
             sampledatastart     = 0xA80A68
             sampledataend       = 0xCDB62C
-            empty               = 0xCDD2F0
+            free                = 0xCDD2F0
         case b'A88J':
             songtable           = 0x205060
             songcount           = 418
@@ -518,15 +518,16 @@ with open(sys.argv[1], 'rb') as rom:
             samplecount         = 239
             sampledatastart     = 0x972564
             sampledataend       = 0xBDA8E4
-            empty               = 0xBDC5A0
+            free                = 0xBDC5A0
         case b'\x00\x00\x00\x00':
-            songtable = 0x116BA0
-            songcount = 172
-            instrumenttable = 0x116E54
-            instrumentcount = 260
-            sampletable = 0x5C6730
-            samplecount = 150
-            id = b'E303'
+            songtable           = 0x116BA0
+            songcount           = 172
+            instrumenttable     = 0x116E54
+            instrumentcount     = 260
+            sampletable         = 0x5C6730
+            samplecount         = 150
+            free                = 0x6BB570
+            id                  = b'E303'
     
     if not pack:
         # extract samples
@@ -582,29 +583,32 @@ with open(sys.argv[1], 'rb') as rom:
             rom.seek(0)
             outrom.write(rom.read())
             
-            # inject samples
+            # clear samples
             outrom.seek(sampletable)
             outrom.write(b'\x00' * samplecount * 4)
             outrom.seek(sampledatastart)
             outrom.write(b'\x00' * (sampledataend - sampledatastart))
+            # inject samples
             folder = f'{id}_samples'
             samplelist = []
             inject_samples()
             
-            # inject instruments
+            # clear instruments
             outrom.seek(instrumenttable)
             outrom.write(b'\x00' * instrumentcount * 2)
             outrom.seek(instrumentdatastart)
             outrom.write(b'\x00' * (instrumentdataend - instrumentdatastart))
+            # inject instruments
             folder = f'{id}_instruments'
             instrumentlist = []
             inject_instruments()
             
-            # inject songs
+            # clear songs
             outrom.seek(songtable)
             outrom.write(b'\x00' * songcount * 4)
             outrom.seek(songdatastart)
             outrom.write(b'\x00' * (songdataend - songdatastart))
+            # inject songs
             folder = f'{id}_songs'
             songlist = []
             inject_songs()
