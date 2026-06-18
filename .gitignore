@@ -1,0 +1,5 @@
+*.gba
+
+*_samples/
+*_instruments/
+*_songs/
