@@ -68,7 +68,7 @@ def read_song():
         case 0xF1:
             prevvolume = volume
             volume = int.from_bytes(rom.read(1), 'little') / 255
-            if not extend:
+            if playing and not extend:
                 adsrtype = 3
                 adsr *= prevvolume / volume
             
@@ -88,7 +88,7 @@ def read_song():
             
         case 0xF6:
             wait += int.from_bytes(rom.read(1), 'little')
-            if not extend:
+            if playing and not extend:
                 adsrtype = 3
             
         case 0xF8:
@@ -96,7 +96,7 @@ def read_song():
             finish += 0.5
             offset += jump
             rom.seek(offset + 3)
-            if not extend:
+            if playing and not extend:
                 adsrtype = 3
             
         case 0xF9:
@@ -105,7 +105,8 @@ def read_song():
         case 0xFF:
             finish = 255
             wait += 48
-            adsrtype = 3
+            if playing:
+                adsrtype = 3
             
         case _:
             if byte < 0xF0:
@@ -115,22 +116,22 @@ def read_song():
                         value2 = int.from_bytes(rom.read(1), 'little')
                         wait += value2
                         if not extend:
-                            if not pulse or adsr == 0:
+                            if not pulse:
                                 wavesample = 0
+                            playing = 1
                             adsr = 0
                             adsrtype = 0
-                            playing = 1
                         extend = 1
                         play_note(note)
                 else:
                     note = int.from_bytes(rom.read(1), 'little')
                     wait += byte
                     if not extend:
-                        if not pulse or adsr == 0:
+                        if not pulse:
                             wavesample = 0
+                        playing = 1
                         adsr = 0
                         adsrtype = 0
-                        playing = 1
                     extend = 0
                     play_note(note)
     offset = rom.tell()
@@ -150,7 +151,10 @@ def sample_pitch(note):
 
 def play_note(note):
     global instrument
+    
     global playing
+    global adsr
+    global adsrtype
     
     global attack
     global decay
@@ -176,6 +180,10 @@ def play_note(note):
     
     if rom.tell() > end:
         playing = 0
+        adsr = 0
+        adsrtype = 4
+        return
+    
     load_wave(int.from_bytes(rom.read(1), 'little'))
     unpitched = int.from_bytes(rom.read(1), 'little')
     
@@ -201,6 +209,7 @@ def tick():
         print(currenttick)
 
 def calculate_adsr():
+    global playing
     global adsr
     global adsrtype
     
@@ -221,10 +230,10 @@ def calculate_adsr():
     if adsrtype == 2:
         adsr == sustain / 255
     if adsrtype == 3:
-        if release == 255 or volume == 0:
+        if release == 255:
+            playing = 0
             adsr = 0
             adsrtype = 4
-            playing = 0
         else:
             adsr -= adsr_formula(release)
             if adsr <= 0:
@@ -253,7 +262,6 @@ def render(track):
     global volume
     global extend
     global wavesample
-    global playing
     global instrument
     global pan
     global finish
@@ -275,6 +283,7 @@ def render(track):
     global sustain
     global release
     
+    global playing
     global adsr
     global adsrtype
     
@@ -295,12 +304,14 @@ def render(track):
     volume = 255
     currentsample = 0
     extend = 0
-    playing = 0
     pan = 0
     finish = 0
     instrument = 0
+    
+    playing = 0
     adsr = 0
-    adsrtype = 0
+    adsrtype = 4
+    
     pulse = channel > 7
     
     mastervolume = 0.5
@@ -310,6 +321,9 @@ def render(track):
         while wait <= currenttick and finish < 255:
             read_song()
         tick()
+        
+        if not playing and adsrtype != 4:
+            print(f'{playing} {adsrtype}')
         
         for _ in range(math.ceil(nexttick - currentsample)):
             if not should_render():
@@ -327,11 +341,18 @@ def render(track):
                     if wavesample >= len(wave):
                         if not wavehasloop:
                             playing = 0
+                            adsr = 0
+                            adsrtype = 4
                         wavesample = waveloop + (wavesample % 1)
                 else:
                     out.extend([0, 0])
             else:
                 out.extend([0, 0])
+            
+            # not accurate but keeps loops consistent
+            if pulse and adsr == 0:
+                wavesample = 0
+            
             currentsample += 1
             
             if currentsample >= endsample:
