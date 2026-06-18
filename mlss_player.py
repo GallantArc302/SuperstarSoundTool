@@ -322,9 +322,6 @@ def render(track):
             read_song()
         tick()
         
-        if not playing and adsrtype != 4:
-            print(f'{playing} {adsrtype}')
-        
         for _ in range(math.ceil(nexttick - currentsample)):
             if not should_render():
                 break
