@@ -486,21 +486,6 @@ def render(track):
     ERAM_PitchRange = 2
     ERAM_Unk11 = 0
     
-    # TOOD: find out what these init to
-    IRAM_Flags = 0
-    IRAM_ADSR = 0
-    IRAM_Sample = 0
-    IRAM_Unpitched = 0
-    IRAM_SamplePlayback = 0
-    IRAM_VolumeRight = 0
-    IRAM_VolumeLeft = 0
-    IRAM_Pitch = 0
-    IRAM_Note = 0
-    IRAM_Attack = 0
-    IRAM_Decay = 0
-    IRAM_Sustain = 0
-    IRAM_Release = 0
-    
     while should_render():
         while ERAM_Wait <= 0 and finish < 255:
             read_song()
