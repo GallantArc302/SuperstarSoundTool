@@ -97,7 +97,7 @@ def read_song():
                 adsrtype = 3
             
         case 0xF2:
-            ERAM_Pan = int.from_bytes(rom.read(1), 'little')
+            ERAM_Pan = int.from_bytes(rom.read(1), 'little', signed=True)
             
         case 0xF4:
             ERAM_PitchRange = int.from_bytes(rom.read(1), 'little')
@@ -182,7 +182,7 @@ def set_volume():
     global IRAM_VolumeLeft
     
     if ERAM_Pan < 0:
-        right = 0xFF - ERAM_Pan
+        right = -ERAM_Pan
         left = 0x7F
     else:
         right = 0x7F
