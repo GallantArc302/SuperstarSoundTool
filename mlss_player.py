@@ -8,45 +8,143 @@ gbaFramerate = (262144.0 / 4389.0)
 #samplesPerFrame = 264 # 15768.060150375939 hz
 samplesPerFrame = 800 # 47782.00045568466 hz
 
-def load_wave(id):
-    global wavehasloop
-    global waverate
-    global waveloop
-    global wavelength
-    global wave
-    
-    temp = rom.tell()
-    
-    if not pulse:
-        rom.seek(wavetable + (id * 4))
-        offset = int.from_bytes(rom.read(4), 'little') + wavetable
-        rom.seek(offset)
-        
-        wavehasloop = int.from_bytes(rom.read(4), 'little') >> 30
-        waverate = int.from_bytes(rom.read(4), 'little') >> 10
-        waveloop = int.from_bytes(rom.read(4), 'little')
-        wavelength = int.from_bytes(rom.read(4), 'little')
-        wave = rom.read(wavelength)
+outrate = round(samplesPerFrame * gbaFramerate)
+
+def set_instrument():
+    if pulse:
+        set_instrument_pcm() # TODO: set_instrument_psg
     else:
-        wavehasloop = 1
-        waveloop = 0
-        wavelength = 8
-        waverate = (440 * (2 ** (-9 / 12))) * wavelength
-        h = 0.8 * 255
-        l = 0.2 * 255
+        set_instrument_pcm()
+
+def set_volume():
+    if pulse:
+        set_pan_psg() # TODO: set_volume_psg
+    else:
+        set_panvolume_pcm()
+
+def set_pan():
+    if pulse:
+        set_pan_psg()
+    else:
+        set_panvolume_pcm()
+
+def set_pitch():
+    if pulse:
+        set_pitch_pcm() # TODO: set_pitch_psg
+    else:
+        set_pitch_pcm()
+
+# based on 0x0819a834
+def set_panvolume_pcm():
+    global IRAM_VolumeRight
+    global IRAM_VolumeLeft
+    
+    if ERAM_Pan >= 0x80:
+        right = 0xFF - ERAM_Pan
+        left = 0x7F
+    else:
+        right = 0x7F
+        left = ERAM_Pan
+    
+    volume = ERAM_Volume
+    
+    if ERAM_Flags & 0x0800 != 0:
+        if ERAM_Flags & 0x1000 == 0:
+            unk = 0
+        elif ERAM_Flags & 0x2000 == 0:
+            unk = ERAM_Unk14
+        else:
+            unk = -ERAM_Unk14
         
-        waves = [[h,l,l,l,l,l,l,l],[h,h,l,l,l,l,l,l],[h,h,h,h,l,l,l,l],[h,h,h,h,h,h,l,l]]
-        wave = waves[id % 4]
+        volume -= unk
+        min(max(volume, 0), 255)
+    
+    # TODO: 0819a87a Unk13
+    IRAM_VolumeRight = volume * right >> 8
+    IRAM_VolumeLeft = volume * left >> 8
+
+# based on 0x0819a79c
+def set_pitch_pcm():
+    global IRAM_Pitch
+    global IRAM_Note
+    
+    pitch = ERAM_Note * 0x100 + ERAM_PitchAmount * ERAM_PitchRange * 2 + ERAM_Unk11
+    
+    if ERAM_Flags & 0x0100 != 0:
+        if ERAM_Flags & 0x0200 == 0:
+            unk = 0
+        elif ERAM_Flags & 0x0400 == 0:
+            unk = ERAM_Unk18
+        else:
+            unk = -ERAM_Unk18
+        
+        pitch += unk
+    
+    IRAM_Pitch = pitch & 0xFF
+    IRAM_Note = pitch >> 8
+
+# based on 0x0819a7ec
+def set_instrument_pcm():
+    temp = rom.tell() # TODO: use eram channel start and offset variables so it doesnt have to be backed and restored
+    
+    global IRAM_Flags
+    global IRAM_Sample
+    global IRAM_Unpitched
+    global IRAM_Attack
+    global IRAM_Decay
+    global IRAM_Sustain
+    global IRAM_Release
+    global IRAM_SamplePlayback
+    
+    IRAM_Flags = 0x00
+    region = get_instrument_region(ERAM_Instrument, ERAM_Note)
+    
+    if region != None:
+        set_pitch()
+        
+        IRAM_Sample = int.from_bytes(rom.read(1), 'little')
+        IRAM_Unpitched = int.from_bytes(rom.read(1), 'little')
+        IRAM_Attack = int.from_bytes(rom.read(1), 'little')
+        IRAM_Decay = int.from_bytes(rom.read(1), 'little')
+        IRAM_Sustain = int.from_bytes(rom.read(1), 'little')
+        IRAM_Release = int.from_bytes(rom.read(1), 'little')
+        IRAM_SamplePlayback = 0
+        IRAM_Flags = 0x80
     
     rom.seek(temp)
 
+# based on 0x0819a8ec
+def get_instrument_region(instrument, note):
+    rom.seek(instrumenttable + instrument * 2)
+    region = instrumenttable + int.from_bytes(rom.read(2), 'little')
+    regionEnd = instrumenttable + int.from_bytes(rom.read(2), 'little')
+    
+    while region != regionEnd:
+        rom.seek(region)
+        minNote = int.from_bytes(rom.read(1), 'little')
+        maxNote = int.from_bytes(rom.read(1), 'little')
+        
+        if minNote <= note <= maxNote:
+            return region
+        else:
+            region += 8
+    
+    return None
+
+# based on 0x0819ab78
+def set_pan_psg():
+    global IRAM_VolumeRight
+    global IRAM_VolumeLeft
+    
+    IRAM_VolumeRight = ERAM_Volume * (ERAM_Pan <= 128) / 2
+    IRAM_VolumeLeft = ERAM_Volume * (ERAM_Pan >= 127) / 2
+
+# based on 0x0819b450
 def read_song():
     global offset
     rom.seek(offset)
     
     global wait
-    global volume
-    global extend
     global wavesample
     global playing
     global finish
@@ -92,12 +190,12 @@ def read_song():
         case 0xF1:
             ERAM_Volume = int.from_bytes(rom.read(1), 'little')
             
-            if playing and not extend:
+            if playing and not ERAM_Flags & 0x0040:
                 IRAM_Flags |= 0x40 # TODO: not actually what it does
                 adsrtype = 3
             
         case 0xF2:
-            ERAM_Pan = int.from_bytes(rom.read(1), 'little', signed=True)
+            ERAM_Pan = int.from_bytes(rom.read(1), 'little')
             
         case 0xF4:
             ERAM_PitchRange = int.from_bytes(rom.read(1), 'little')
@@ -108,8 +206,7 @@ def read_song():
         case 0xF6:
             ERAM_Wait = int.from_bytes(rom.read(1), 'little')
             
-            wait += ERAM_Wait
-            if playing and not extend:
+            if playing and not ERAM_Flags & 0x0040:
                 IRAM_Flags |= 0x40 # TODO: not actually what it does
                 adsrtype = 3
             
@@ -120,7 +217,7 @@ def read_song():
             finish += 0.5
             offset += jump
             rom.seek(offset + 3)
-            if playing and not extend:
+            if playing and not ERAM_Flags & 0x0040:
                 IRAM_Flags |= 0x40 # TODO: not actually what it does
                 adsrtype = 3
             
@@ -140,6 +237,13 @@ def read_song():
             
         case _:
             if byte < 0xE0:
+                # TODO: remove this after flags and IRAM are working
+                if not ERAM_Flags & 0x0040:
+                    if not pulse:
+                        wavesample = 0
+                    playing_start()
+                #
+                
                 note = int.from_bytes(rom.read(1), 'little')
                 ERAM_Note = note & 0x7F
                 
@@ -166,113 +270,8 @@ def read_song():
                     if note & 0x80 != 0:
                         ERAM_Wait = int.from_bytes(rom.read(1), 'little')
                 
-                # TODO: remove this after flags and IRAM are working
-                if not extend:
-                    if not pulse:
-                        wavesample = 0
-                    playing_start()
-                
-                extend = note & 0x80
-                play_note(note & 0x7F)
+                play_note()
     offset = rom.tell()
-
-# based on 0x0819b5fa
-def set_volume():
-    global IRAM_VolumeRight
-    global IRAM_VolumeLeft
-    
-    if ERAM_Pan < 0:
-        right = -ERAM_Pan
-        left = 0x7F
-    else:
-        right = 0x7F
-        left = ERAM_Pan
-    
-    volume = ERAM_Volume
-    
-    if ERAM_Flags & 0x0800 != 0:
-        if ERAM_Flags & 0x1000 == 0:
-            unk = 0
-        elif ERAM_Flags & 0x2000 == 0:
-            unk = ERAM_Unk14
-        else:
-            unk = -ERAM_Unk14
-        
-        volume -= unk
-        min(max(volume, 0), 255)
-    
-    # TODO: 0819a87a Unk13
-    IRAM_VolumeRight = volume * right >> 8
-    IRAM_VolumeLeft = volume * left >> 8
-
-# based on 0x0819a79c
-def set_pitch():
-    global IRAM_Pitch
-    global IRAM_Note
-    
-    pitch = ERAM_Note * 0x100 + ERAM_PitchAmount * ERAM_PitchRange * 2 + ERAM_Unk11
-    
-    if ERAM_Flags & 0x0100 != 0:
-        if ERAM_Flags & 0x0200 == 0:
-            unk = 0
-        elif ERAM_Flags & 0x0400 == 0:
-            unk = ERAM_Unk18
-        else:
-            unk = -ERAM_Unk18
-        
-        pitch += unk
-    
-    IRAM_Pitch = pitch & 0xFF
-    IRAM_Note = pitch >> 8
-
-# based on 0x0819a7ec
-def set_instrument():
-    temp = rom.tell() # TODO: use eram channel start and offset variables so it doesnt have to be backed and restored
-    
-    global IRAM_Flags
-    global IRAM_Sample
-    global IRAM_Unpitched
-    global IRAM_Attack
-    global IRAM_Decay
-    global IRAM_Sustain
-    global IRAM_Release
-    global IRAM_SamplePlayback
-    
-    IRAM_Flags = 0x0000
-    region = get_instrument_region(ERAM_Instrument, ERAM_Note)
-    
-    if region != None:
-        set_pitch()
-        
-        IRAM_Sample = int.from_bytes(rom.read(1), 'little')
-        IRAM_Unpitched = int.from_bytes(rom.read(1), 'little')
-        IRAM_Attack = int.from_bytes(rom.read(1), 'little')
-        IRAM_Decay = int.from_bytes(rom.read(1), 'little')
-        IRAM_Sustain = int.from_bytes(rom.read(1), 'little')
-        IRAM_Release = int.from_bytes(rom.read(1), 'little')
-        IRAM_SamplePlayback = 0
-        IRAM_Flags = 0x0080
-    
-    rom.seek(temp)
-
-# based on 0x0819a8ec
-def get_instrument_region(instrument, note):
-    rom.seek(instrumenttable + instrument * 2)
-    region = instrumenttable + int.from_bytes(rom.read(2), 'little')
-    regionEnd = instrumenttable + int.from_bytes(rom.read(2), 'little')
-    
-    while region != regionEnd:
-        rom.seek(region)
-        minNote = int.from_bytes(rom.read(1), 'little')
-        maxNote = int.from_bytes(rom.read(1), 'little')
-        
-        if minNote <= note <= maxNote:
-            return region
-        else:
-            region += 8
-    
-    return None
-    
 
 def get_sample(wave, sample, volume):
     return (wave[sample] - 0x80) * volume
@@ -280,36 +279,17 @@ def get_sample(wave, sample, volume):
 def sample_pitch(note):
     global samplerate
     
-    pitch = note + IRAM_Pitch / 128
+    pitch = note + IRAM_Pitch / 256
     
     samplerate = waverate * (2 ** ((pitch - 60)/12))
 
-def play_note(note):
-    global playing
-    global adsrtype
-    
-    global IRAM_Attack
-    global IRAM_Decay
-    global IRAM_Sustain
-    global IRAM_Release
-    
-    set_volume()
+def play_note():
     load_wave(IRAM_Sample)
     
     if IRAM_Unpitched:
         sample_pitch(60)
     else:
-        sample_pitch(note)
-
-# TODO: make frame based instead of tick based
-def tick():
-    global nexttick
-    global currenttick
-    
-    nexttick += int((1.25 / ERAM_BPM) * outrate * (expectedFramerate / gbaFramerate))
-    currenttick += 1
-    if currenttick % 192 == 0:
-        print(currenttick)
+        sample_pitch(IRAM_Note)
 
 # based on 0x0819a2f0
 def calculate_adsr():
@@ -321,12 +301,6 @@ def calculate_adsr():
     global IRAM_ADSR
     
     if not pulse: # TODO: check code, MAYBE pulse doesnt get tied to framerate?
-        if adsrFrameCounter > 0:
-            adsrFrameCounter -= gbaFramerate / outrate
-            return
-        
-        adsrFrameCounter += 1
-        
         if IRAM_Flags != 0x00:
             if IRAM_Flags == 0x80:
                 IRAM_ADSR = IRAM_Attack
@@ -347,7 +321,7 @@ def calculate_adsr():
                 if IRAM_Flags != 0x83:
                     IRAM_ADSR -= IRAM_Release
                     if adsrBackup < IRAM_Release or IRAM_ADSR == 0:
-                        IRAM_Flags = 0
+                        IRAM_Flags = 0x00
                     return
     else: # TODO: find pulse adsr code
         if adsrtype == 0:
@@ -378,12 +352,11 @@ def calculate_adsr():
                     return
 
 def adsr_formula(value):
-    return value / outrate / (ERAM_Volume / 1024)
+    return (value / outrate / (ERAM_Volume / 1024)) * 1024
 
 def playing_start(): # TODO: figure out how this works and what it sets
     global playing
     global adsrtype
-    global adsrFrameCounter
     
     global IRAM_Flags
     global IRAM_ADSR
@@ -392,7 +365,6 @@ def playing_start(): # TODO: figure out how this works and what it sets
     playing = 1
     IRAM_ADSR = 0
     adsrtype = 0
-    adsrFrameCounter = 0
 
 def playing_stop(): # TODO: figure out how this works and what it sets
     global playing
@@ -406,17 +378,45 @@ def playing_stop(): # TODO: figure out how this works and what it sets
     IRAM_ADSR = 0
     adsrtype = 4
 
+def load_wave(id):
+    global wavehasloop
+    global waverate
+    global waveloop
+    global wavelength
+    global wave
+    
+    temp = rom.tell()
+    
+    if not pulse:
+        rom.seek(wavetable + (id * 4))
+        offset = int.from_bytes(rom.read(4), 'little') + wavetable
+        rom.seek(offset)
+        
+        wavehasloop = int.from_bytes(rom.read(4), 'little') >> 30
+        waverate = int.from_bytes(rom.read(4), 'little') >> 10
+        waveloop = int.from_bytes(rom.read(4), 'little')
+        wavelength = int.from_bytes(rom.read(4), 'little')
+        wave = rom.read(wavelength)
+    else:
+        wavehasloop = 1
+        waveloop = 0
+        wavelength = 8
+        waverate = (440 * (2 ** (-9 / 12))) * wavelength
+        h = 0.8 * 255
+        l = 0.2 * 255
+        
+        waves = [[h,l,l,l,l,l,l,l],[h,h,l,l,l,l,l,l],[h,h,h,h,l,l,l,l],[h,h,h,h,h,h,l,l]]
+        wave = waves[id % 4]
+    
+    rom.seek(temp)
+
 def should_render():
-    return (finish < 1 or maxxed < 1 or (finish == 255 and adsrtype != 4)) and currenttick < 20000 # TODO: remove cap after iram and stuff are working
+    return (finish < 1 or maxxed < 1 or (finish == 255 and adsrtype != 4))
 
 def render(track):
     global samplerate
-    global nexttick
-    global currenttick
     global currentsample
     global wait
-    global volume
-    global extend
     global wavesample
     global finish
     global offset
@@ -481,19 +481,29 @@ def render(track):
     global IRAM_Sustain
     global IRAM_Release
     
+    global PSG_Attack
+    global PSG_Decay
+    global PSG_Sustain
+    global PSG_Release
+    global PSG_Unk4
+    global PSG_Unk5
+    global PSG_Wave
+    global PSG_Unk7
+    global PSG_Unk8
+    global PSG_Unk9
+    global PSG_UnkA
+    global PSG_UnkB
+    
+    global REG_SOUNDCNT_L
+    
     rom.seek(offset + (track * 2))
     offset += int.from_bytes(rom.read(2), 'little')
     rom.seek(offset)
     
-    nexttick = 0
-    currenttick = 0
-    
     out = []
     wavesample = 0
     wait = 0
-    volume = 200
     currentsample = 0
-    extend = 0
     finish = 0
     
     playing_stop()
@@ -531,19 +541,46 @@ def render(track):
     IRAM_Sustain = 0
     IRAM_Release = 0
     
+    # zero
+    PSG_Attack = 0
+    PSG_Decay = 0
+    PSG_Sustain = 0
+    PSG_Release = 0
+    PSG_Unk4 = 0
+    PSG_Unk5 = 0
+    PSG_Wave = 0
+    PSG_Unk7 = 0
+    PSG_Unk8 = 0
+    PSG_Unk9 = 0
+    PSG_UnkA = 0
+    PSG_UnkB = 0
+    
+    leftover = 0
+    
     while should_render():
+        if currentsample % (samplesPerFrame * 600) == 0:
+            print(currentsample / (samplesPerFrame * 60))
+        
         while ERAM_Wait <= 0 and finish < 255:
             read_song()
-        tick()
-        ERAM_Wait -= 1
         
-        for _ in range(math.ceil(nexttick - currentsample)):
+        ERAM_Wait += leftover
+        leftover = 0
+        ERAM_Wait -= ERAM_BPM / (1.25 * expectedFramerate)
+        if ERAM_Wait < 0:
+            leftover = ERAM_Wait
+        
+        #set_pitch()
+        set_volume()
+        #if pulse: set_pan()
+        
+        calculate_adsr()
+        
+        for _ in range(round(samplesPerFrame)):
             if not should_render():
                 break
             
-            if playing and IRAM_Flags & 0x80:
-                calculate_adsr()
-                
+            if IRAM_Flags & 0x80:
                 if adsrtype != 4 and IRAM_Flags & 0x80:
                     sampleL = get_sample(wave, int(wavesample), (IRAM_VolumeLeft / 256) * (IRAM_ADSR / 256))
                     sampleR = get_sample(wave, int(wavesample), (IRAM_VolumeRight / 256) * (IRAM_ADSR / 256))
@@ -559,10 +596,6 @@ def render(track):
                     out.extend([0, 0])
             else:
                 out.extend([0, 0])
-            
-            # not accurate but keeps loops consistent
-            if pulse and IRAM_ADSR == 0:
-                wavesample = 0
             
             currentsample += 1
             
@@ -580,9 +613,6 @@ with open(f'{input()}.gba', 'rb') as rom:
     #songtable = 0x116BA0
     #instrumenttable = 0x116E54
     #wavetable = 0x5C6730
-    
-    #outrate = 15768
-    outrate = 48000
     
     songindex = int(input())
     
@@ -616,32 +646,33 @@ with open(f'{input()}.gba', 'rb') as rom:
                 if retry == 0:
                     track += 1
                     
-                    global offset
-                    offset = song
-                    
-                    rendered = render(track)
-                    
-                    if endsample > prevmax:
-                        prevmax = endsample
-                        if track > 1: retry = 1
-                    
-                    print(f'ENDSAMPLE: {endsample}')
-                    
-                    with open(f'{songindex}_{channel}.wav', 'wb') as out:
-                        out.write('RIFF'.encode('ascii'))
-                        out.write((len(rendered) * 2 + 36).to_bytes(4, 'little')) # riff size
-                        out.write('WAVEfmt '.encode('ascii'))
-                        out.write((16).to_bytes(4, 'little')) # fmt size
-                        out.write((1).to_bytes(2, 'little')) # type
-                        out.write((2).to_bytes(2, 'little')) # channels
-                        out.write((outrate).to_bytes(4, 'little')) # sample rate
-                        out.write((outrate * 2 * 2).to_bytes(4, 'little')) # sample rate * bytes * channels
-                        out.write((2 * 2).to_bytes(2, 'little')) # bytes * channels
-                        out.write((16).to_bytes(2, 'little')) # bits
+                    if channel >= 0:
+                        global offset
+                        offset = song
                         
-                        out.write('data'.encode('ascii'))
-                        out.write((len(rendered) * 2).to_bytes(4, 'little')) # data size
-                        out.write(np.array(rendered, np.int16))
+                        rendered = render(track)
+                        
+                        if endsample > prevmax:
+                            prevmax = endsample
+                            if track > 1: retry = 1
+                        
+                        print(f'ENDSAMPLE: {endsample}')
+                        
+                        with open(f'{songindex}_{channel}.wav', 'wb') as out:
+                            out.write('RIFF'.encode('ascii'))
+                            out.write((len(rendered) * 2 + 36).to_bytes(4, 'little')) # riff size
+                            out.write('WAVEfmt '.encode('ascii'))
+                            out.write((16).to_bytes(4, 'little')) # fmt size
+                            out.write((1).to_bytes(2, 'little')) # type
+                            out.write((2).to_bytes(2, 'little')) # channels
+                            out.write((outrate).to_bytes(4, 'little')) # sample rate
+                            out.write((outrate * 2 * 2).to_bytes(4, 'little')) # sample rate * bytes * channels
+                            out.write((2 * 2).to_bytes(2, 'little')) # bytes * channels
+                            out.write((16).to_bytes(2, 'little')) # bits
+                            
+                            out.write('data'.encode('ascii'))
+                            out.write((len(rendered) * 2).to_bytes(4, 'little')) # data size
+                            out.write(np.array(rendered, np.int16))
                     
             if retry == 0:
                 songindex += 1
