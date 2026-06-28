@@ -402,8 +402,8 @@ def load_wave(id):
         waveloop = 0
         wavelength = 8
         waverate = (440 * (2 ** (-9 / 12))) * wavelength
-        h = 0.8 * 255
-        l = 0.2 * 255
+        h = 0.75 * 255
+        l = 0.25 * 255
         
         waves = [[h,l,l,l,l,l,l,l],[h,h,l,l,l,l,l,l],[h,h,h,h,l,l,l,l],[h,h,h,h,h,h,l,l]]
         wave = waves[id % 4]
@@ -570,9 +570,11 @@ def render(track):
         if ERAM_Wait < 0:
             leftover = ERAM_Wait
         
-        #set_pitch()
-        set_volume()
-        #if pulse: set_pan()
+        # TODO: figure out when these are set
+        if IRAM_Flags >= 0x80 and IRAM_Flags <= 0x83:
+            #set_pitch()
+            set_volume()
+            #if pulse: set_pan()
         
         calculate_adsr()
         
