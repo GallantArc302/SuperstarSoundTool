@@ -212,6 +212,8 @@ def read_song():
         case 0xF8:
             #ERAM_ChannelOffset += 2 + int.from_bytes(rom.read(2), 'little', signed=True)
             
+            if finish == 0: print(f'LOOP {currentsample}')
+            
             jump = int.from_bytes(rom.read(2), 'little', signed=True)
             finish += 0.5
             offset += jump
@@ -554,8 +556,10 @@ def render(track):
     leftover = 0
     
     while should_render():
-        if currentsample % (samplesPerFrame * 600) == 0:
-            print(currentsample / (samplesPerFrame * 60))
+        renderTime = currentsample / (samplesPerFrame * 60)
+        
+        if renderTime % 10 == 0:
+            print(f'{songIndex} {channel}: Rendering... {int(renderTime)} seconds')
         
         while ERAM_Wait <= 0 and finish < 255:
             read_song()
@@ -607,14 +611,14 @@ with open(f'{input()}.gba', 'rb') as rom:
     #instrumenttable = 0x116E54
     #wavetable = 0x5C6730
     
-    songindex = int(input())
+    songIndex = int(input())
     
     for i in range(int(input())):
         global endsample
         endsample = 0
         prevmax = 0
         
-        rom.seek(songtable + (songindex * 4))
+        rom.seek(songtable + (songIndex * 4))
         song = int.from_bytes(rom.read(4), 'little') - 0x08000000
         
         rom.seek(song)
@@ -636,36 +640,37 @@ with open(f'{input()}.gba', 'rb') as rom:
             retry = 0
             
             for channel in tracksenabled:
-                if retry == 0:
-                    track += 1
+                track += 1
+                
+                global offset
+                offset = song
+                
+                rendered = render(track)
+                
+                if endsample > prevmax:
+                    prevmax = endsample
+                    if track > 1:
+                        retry = 1
+                        print('\nRETRYING: Underestimated length...\n')
+                        break
+                
+                print('DONE\n')
+                
+                with open(f'{songIndex}_{channel}.wav', 'wb') as out:
+                    out.write('RIFF'.encode('ascii'))
+                    out.write((len(rendered) * 2 + 36).to_bytes(4, 'little')) # riff size
+                    out.write('WAVEfmt '.encode('ascii'))
+                    out.write((16).to_bytes(4, 'little')) # fmt size
+                    out.write((1).to_bytes(2, 'little')) # type
+                    out.write((2).to_bytes(2, 'little')) # channels
+                    out.write((outrate).to_bytes(4, 'little')) # sample rate
+                    out.write((outrate * 2 * 2).to_bytes(4, 'little')) # sample rate * bytes * channels
+                    out.write((2 * 2).to_bytes(2, 'little')) # bytes * channels
+                    out.write((16).to_bytes(2, 'little')) # bits
                     
-                    if channel >= 0:
-                        global offset
-                        offset = song
-                        
-                        rendered = render(track)
-                        
-                        if endsample > prevmax:
-                            prevmax = endsample
-                            if track > 1: retry = 1
-                        
-                        print(f'ENDSAMPLE: {endsample}')
-                        
-                        with open(f'{songindex}_{channel}.wav', 'wb') as out:
-                            out.write('RIFF'.encode('ascii'))
-                            out.write((len(rendered) * 2 + 36).to_bytes(4, 'little')) # riff size
-                            out.write('WAVEfmt '.encode('ascii'))
-                            out.write((16).to_bytes(4, 'little')) # fmt size
-                            out.write((1).to_bytes(2, 'little')) # type
-                            out.write((2).to_bytes(2, 'little')) # channels
-                            out.write((outrate).to_bytes(4, 'little')) # sample rate
-                            out.write((outrate * 2 * 2).to_bytes(4, 'little')) # sample rate * bytes * channels
-                            out.write((2 * 2).to_bytes(2, 'little')) # bytes * channels
-                            out.write((16).to_bytes(2, 'little')) # bits
-                            
-                            out.write('data'.encode('ascii'))
-                            out.write((len(rendered) * 2).to_bytes(4, 'little')) # data size
-                            out.write(np.array(rendered, np.int16))
-                    
+                    out.write('data'.encode('ascii'))
+                    out.write((len(rendered) * 2).to_bytes(4, 'little')) # data size
+                    out.write(np.array(rendered, np.int16))
+                
             if retry == 0:
-                songindex += 1
+                songIndex += 1
