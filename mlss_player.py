@@ -144,7 +144,6 @@ def read_song():
     global offset
     rom.seek(offset)
     
-    global wait
     global wavesample
     global playing
     global finish
@@ -230,7 +229,6 @@ def read_song():
             ERAM_Flags = 0x0000
             
             finish = 255
-            wait += 48
             if playing:
                 IRAM_Flags |= 0x40 # TODO: not actually what it does
                 adsrtype = 3
@@ -411,12 +409,11 @@ def load_wave(id):
     rom.seek(temp)
 
 def should_render():
-    return (finish < 1 or maxxed < 1 or (finish == 255 and adsrtype != 4))
+    return (finish < 1 or maxxed < 1 or (finish == 255 and ((pulse and adsrtype != 4) or (not pulse and IRAM_Flags != 0x00))))
 
 def render(track):
     global samplerate
     global currentsample
-    global wait
     global wavesample
     global finish
     global offset
@@ -502,7 +499,6 @@ def render(track):
     
     out = []
     wavesample = 0
-    wait = 0
     currentsample = 0
     finish = 0
     
@@ -576,10 +572,10 @@ def render(track):
         
         calculate_adsr()
         
+        if not should_render():
+            break
+        
         for _ in range(round(samplesPerFrame)):
-            if not should_render():
-                break
-            
             if IRAM_Flags & 0x80:
                 if adsrtype != 4 and IRAM_Flags & 0x80:
                     sampleL = get_sample(wave, int(wavesample), (IRAM_VolumeLeft / 256) * (IRAM_ADSR / 256))
