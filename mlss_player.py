@@ -575,29 +575,26 @@ def render(track):
         if not should_render():
             break
         
-        for _ in range(round(samplesPerFrame)):
-            if IRAM_Flags & 0x80:
-                if adsrtype != 4 and IRAM_Flags & 0x80:
-                    sampleL = get_sample(wave, int(wavesample), (IRAM_VolumeLeft / 256) * (IRAM_ADSR / 256))
-                    sampleR = get_sample(wave, int(wavesample), (IRAM_VolumeRight / 256) * (IRAM_ADSR / 256))
-                    out.extend([int(sampleL * 256), int(sampleR * 256)])
-                    
-                    wavesample += (samplerate / outrate)
-                    
-                    if wavesample >= len(wave):
-                        if not wavehasloop:
-                            playing_stop()
-                        wavesample = waveloop + (wavesample % 1)
-                else:
-                    out.extend([0, 0])
-            else:
-                out.extend([0, 0])
-            
-            currentsample += 1
-            
-            if currentsample >= endsample:
-                maxxed = 1
-                endsample = currentsample
+        if adsrtype != 4 and IRAM_Flags & 0x80:
+            for _ in range(round(samplesPerFrame)):
+                sampleL = get_sample(wave, int(wavesample), (IRAM_VolumeLeft / 256) * (IRAM_ADSR / 256))
+                sampleR = get_sample(wave, int(wavesample), (IRAM_VolumeRight / 256) * (IRAM_ADSR / 256))
+                out.extend([int(sampleL * 256), int(sampleR * 256)])
+                
+                wavesample += (samplerate / outrate)
+                
+                if wavesample >= len(wave):
+                    if not wavehasloop:
+                        playing_stop()
+                    wavesample = waveloop + (wavesample % 1)
+        else:
+            out.extend([0, 0] * samplesPerFrame)
+        
+        currentsample += samplesPerFrame
+        
+        if currentsample >= endsample:
+            maxxed = 1
+            endsample = currentsample
         
     return out
 
