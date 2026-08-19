@@ -35,14 +35,14 @@ mus_fawful
 mus_koopacruiser
 mus_danger
 mus_popple
-mus_bosscackletta
+mus_cacklettaboss
 mus_bowletta
 mus_ending
 mus_credits
 mus_title
 mus_chateaudechucklehuck
 mus_woohoohooniversity_unused
-mus_bosscacklettafinal
+mus_cacklettafinal
 mus_teeheevalley_unused
 mus_hoohoovillage_unused
 mus_fileselect_unused
