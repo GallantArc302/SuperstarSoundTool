@@ -5,10 +5,30 @@ import math
 
 expectedFramerate = 60
 gbaFramerate = (262144.0 / 4389.0)
-#samplesPerFrame = 264 # 15768.060150375939 hz
-samplesPerFrame = 800 # 47782.00045568466 hz
+samplesPerFrame = 264 # 15768.060150375939 hz
+#samplesPerFrame = 800 # 47782.00045568466 hz
+upsample = 3
 
 outrate = round(samplesPerFrame * gbaFramerate)
+
+
+PLAYBACK_ACTIVE = 1 << 0
+PLAYBACK_INIT = 1 << 1
+PLAYBACK_UNK0004 = 1 << 2
+PLAYBACK_UNK0008 = 1 << 3
+PLAYBACK_UNK0010 = 1 << 4
+PLAYBACK_UNK0020 = 1 << 5
+PLAYBACK_EXTEND = 1 << 6
+PLAYBACK_PLAYING = 1 << 7
+PLAYBACK_UNK0100 = 1 << 8
+PLAYBACK_UNK0200 = 1 << 9
+PLAYBACK_UNK0400 = 1 << 10
+PLAYBACK_UNK0800 = 1 << 11
+PLAYBACK_UNK1000 = 1 << 12
+PLAYBACK_UNK2000 = 1 << 13
+PLAYBACK_UNK4000 = 1 << 14
+PLAYBACK_UNK8000 = 1 << 15
+
 
 def set_instrument():
     if pulse:
@@ -131,13 +151,30 @@ def get_instrument_region(instrument, note):
     
     return None
 
-# based on 0x0819ab78
+# sub_819AB78
 def set_pan_psg():
     global IRAM_VolumeRight
     global IRAM_VolumeLeft
     
     IRAM_VolumeRight = ERAM_Volume * (ERAM_Pan <= 128) / 2
     IRAM_VolumeLeft = ERAM_Volume * (ERAM_Pan >= 127) / 2
+
+# sub_0819B040
+def init_eram():
+    global ERAM_Flags, ERAM_ChannelStart, ERAM_ChannelOffset, ERAM_BPM, ERAM_Unk03, ERAM_Instrument, ERAM_Pan, ERAM_Wait, ERAM_Volume, ERAM_PitchAmount, ERAM_PitchRange, ERAM_Unk11
+    
+    ERAM_Flags = PLAYBACK_PLAYING | PLAYBACK_INIT | PLAYBACK_ACTIVE
+    ERAM_ChannelStart = 0 # TODO: figure this out
+    ERAM_ChannelOffset = 0
+    ERAM_BPM = 120
+    ERAM_Unk03 = 0
+    ERAM_Instrument = 0
+    ERAM_Pan = 127
+    ERAM_Wait = 1
+    ERAM_Volume = 200
+    ERAM_PitchAmount = 0
+    ERAM_PitchRange = 2
+    ERAM_Unk11 = 0
 
 # based on 0x0819b450
 def read_song():
@@ -189,7 +226,7 @@ def read_song():
         case 0xF1:
             ERAM_Volume = int.from_bytes(rom.read(1), 'little')
             
-            if playing and not ERAM_Flags & 0x0040:
+            if playing and not ERAM_Flags & PLAYBACK_EXTEND:
                 IRAM_Flags |= 0x40 # TODO: not actually what it does
                 adsrtype = 3
             
@@ -205,7 +242,7 @@ def read_song():
         case 0xF6:
             ERAM_Wait = int.from_bytes(rom.read(1), 'little')
             
-            if playing and not ERAM_Flags & 0x0040:
+            if playing and not ERAM_Flags & PLAYBACK_EXTEND:
                 IRAM_Flags |= 0x40 # TODO: not actually what it does
                 adsrtype = 3
             
@@ -218,7 +255,7 @@ def read_song():
             finish += 0.5
             offset += jump
             rom.seek(offset + 3)
-            if playing and not ERAM_Flags & 0x0040:
+            if playing and not ERAM_Flags & PLAYBACK_EXTEND:
                 IRAM_Flags |= 0x40 # TODO: not actually what it does
                 adsrtype = 3
             
@@ -226,9 +263,9 @@ def read_song():
             ERAM_BPM = int.from_bytes(rom.read(1), 'little')
             
         case 0xFF:
-            if ERAM_Flags & 0x0080 != 0:
-                ERAM_Flags |= 0x0040 # ??? 0819b852 why does it do this
-            ERAM_Flags = 0x0000
+            if ERAM_Flags & PLAYBACK_PLAYING != 0:
+                ERAM_Flags |= PLAYBACK_EXTEND # ??? 0819b852 why does it do this
+            ERAM_Flags = 0
             
             finish = 255
             if playing:
@@ -238,7 +275,7 @@ def read_song():
         case _:
             if byte < 0xE0:
                 # TODO: remove this after flags and IRAM are working
-                if not ERAM_Flags & 0x0040:
+                if not ERAM_Flags & PLAYBACK_EXTEND:
                     if not pulse:
                         wavesample = 0
                     playing_start()
@@ -247,26 +284,26 @@ def read_song():
                 note = int.from_bytes(rom.read(1), 'little')
                 ERAM_Note = note & 0x7F
                 
-                if ERAM_Flags & 0x0040 == 0:
-                    if ERAM_Flags & 0x0800 != 0:
-                        ERAM_Flags &= 0xCFFF
+                if ERAM_Flags & PLAYBACK_EXTEND == 0:
+                    if ERAM_Flags & PLAYBACK_UNK0800 != 0:
+                        ERAM_Flags &= PLAYBACK_UNK1000 | PLAYBACK_UNK2000
                         ERAM_Unk17 = ERAM_Unk16
-                    if ERAM_Flags & 0x0100 != 0:
-                        ERAM_Flags &= 0xF9FF
+                    if ERAM_Flags & PLAYBACK_UNK0100 != 0:
+                        ERAM_Flags &= PLAYBACK_UNK0200 | PLAYBACK_UNK0400
                         ERAM_Unk1B = ERAM_Unk1A
                     set_pitch()
                     set_instrument()
-                    ERAM_Flags |= 0x0080
+                    ERAM_Flags |= PLAYBACK_PLAYING
                 else:
                     set_pitch()
-                    ERAM_Flags &= 0xFFBF
+                    ERAM_Flags &= ~PLAYBACK_EXTEND
                 
                 if byte != 0:
                     if note & 0x80 != 0:
-                        ERAM_Flags |= 0x0020
+                        ERAM_Flags |= PLAYBACK_UNK0020
                     ERAM_Wait = byte
                 else:
-                    ERAM_Flags |= 0x0040
+                    ERAM_Flags |= PLAYBACK_EXTEND
                     if note & 0x80 != 0:
                         ERAM_Wait = int.from_bytes(rom.read(1), 'little')
                 
@@ -510,19 +547,7 @@ def render(track):
     
     maxxed = 0
     
-    # DEFAULTS from 0x0819b040
-    ERAM_Flags = 0x0083
-    ERAM_ChannelStart = 0 # TODO: figure this out
-    ERAM_ChannelOffset = 0
-    ERAM_BPM = 120
-    ERAM_Unk03 = 0
-    ERAM_Instrument = 0
-    ERAM_Pan = 127
-    ERAM_Wait = 1
-    ERAM_Volume = 200
-    ERAM_PitchAmount = 0
-    ERAM_PitchRange = 2
-    ERAM_Unk11 = 0
+    init_eram()
     
     # zero
     IRAM_Flags = 0
@@ -555,6 +580,9 @@ def render(track):
     
     leftover = 0
     
+    pulse_rerender = (1 + pulse * (upsample - 1))
+    pcm_rerender = (1 + (1 - pulse) * (upsample - 1))
+    
     while should_render():
         renderTime = currentsample / (samplesPerFrame * 60)
         
@@ -582,19 +610,19 @@ def render(track):
             break
         
         if adsrtype != 4 and IRAM_Flags & 0x80:
-            for _ in range(round(samplesPerFrame)):
+            for _ in range(round(samplesPerFrame) * pulse_rerender):
                 sampleL = get_sample(wave, int(wavesample), (IRAM_VolumeLeft / 256) * (IRAM_ADSR / 256))
                 sampleR = get_sample(wave, int(wavesample), (IRAM_VolumeRight / 256) * (IRAM_ADSR / 256))
-                out.extend([int(sampleL * 256), int(sampleR * 256)])
+                out.extend([int(sampleL * 256), int(sampleR * 256)] * pcm_rerender)
                 
-                wavesample += (samplerate / outrate)
+                wavesample += (samplerate / outrate) / pulse_rerender
                 
                 if wavesample >= len(wave):
                     if not wavehasloop:
                         playing_stop()
                     wavesample = waveloop + (wavesample % 1)
         else:
-            out.extend([0, 0] * samplesPerFrame)
+            out.extend([0, 0] * samplesPerFrame * upsample)
         
         currentsample += samplesPerFrame
         
@@ -665,8 +693,8 @@ with open(f'{input()}.gba', 'rb') as rom:
                     out.write((16).to_bytes(4, 'little')) # fmt size
                     out.write((1).to_bytes(2, 'little')) # type
                     out.write((2).to_bytes(2, 'little')) # channels
-                    out.write((outrate).to_bytes(4, 'little')) # sample rate
-                    out.write((outrate * 2 * 2).to_bytes(4, 'little')) # sample rate * bytes * channels
+                    out.write((outrate * upsample).to_bytes(4, 'little')) # sample rate
+                    out.write((outrate * upsample * 2 * 2).to_bytes(4, 'little')) # sample rate * bytes * channels
                     out.write((2 * 2).to_bytes(2, 'little')) # bytes * channels
                     out.write((16).to_bytes(2, 'little')) # bits
                     

@@ -5,3 +5,4 @@ some research based on https://github.com/Kermalis/VGMusicStudio/
 	read unreferenced parts of songs by caching all data offsets first
 	separate songs and sounds like the game does
 	read from offsets.txt instead of hardcoding
+	add support for wavetables
