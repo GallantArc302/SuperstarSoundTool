@@ -105,7 +105,7 @@ def set_pitch_pcm():
     PCM_Pitch = pitch & 0xFF
     PCM_Note = pitch >> 8
 
-# based on 0x0819a7ec
+# sub_819A7EC
 def set_instrument_pcm():
     temp = rom.tell() # TODO: use eram channel start and offset variables so it doesnt have to be backed and restored
     
@@ -121,11 +121,11 @@ def set_instrument_pcm():
     PCM_Flags = 0x00
     region = get_instrument_region(Track_Instrument, Track_Note)
     
-    if region != None:
+    if region != 0:
         set_pitch()
         
         PCM_Sample = int.from_bytes(rom.read(1), 'little')
-        PCM_Unpitched = int.from_bytes(rom.read(1), 'little')
+        PCM_Unpitched = int.from_bytes(rom.read(1), 'little') # TODO: unpitched doesnt exist
         PCM_Attack = int.from_bytes(rom.read(1), 'little')
         PCM_Decay = int.from_bytes(rom.read(1), 'little')
         PCM_Sustain = int.from_bytes(rom.read(1), 'little')
@@ -135,7 +135,7 @@ def set_instrument_pcm():
     
     rom.seek(temp)
 
-# based on 0x0819a8ec
+# sub_819A8EC
 def get_instrument_region(instrument, note):
     rom.seek(instrumenttable + instrument * 2)
     region = instrumenttable + int.from_bytes(rom.read(2), 'little')
@@ -146,12 +146,17 @@ def get_instrument_region(instrument, note):
         minNote = int.from_bytes(rom.read(1), 'little')
         maxNote = int.from_bytes(rom.read(1), 'little')
         
-        if minNote <= note <= maxNote:
-            return region
-        else:
+        if (minNote > note):
             region += 8
+            continue
+        
+        if (maxNote < note):
+            region += 8
+            continue
+        
+        return region
     
-    return None
+    return 0
 
 # sub_819AB78
 def set_pan_psg():
